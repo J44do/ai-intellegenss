@@ -6,14 +6,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// API Keys und Tokens aus den Umgebungsvariablen laden
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const APP_SECRET_TOKEN = process.env.APP_SECRET_TOKEN;
 
-// Google GenAI Initialisierung
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-// Middleware zur Prüfung des geheimen App-Tokens
 function authenticateApp(req, res, next) {
     const clientToken = req.headers['x-app-token'];
     if (!APP_SECRET_TOKEN || clientToken !== APP_SECRET_TOKEN) {
@@ -22,22 +19,36 @@ function authenticateApp(req, res, next) {
     next();
 }
 
-// Startseiten-Route (damit kein "Cannot GET /" erscheint)
 app.get('/', (req, res) => {
     res.send('AI-Intellegens Server läuft ordnungsgemäß.');
 });
 
-// Prompt-Route für die Android-App (geschützt durch Token)
+// Route mit Unterstützung für Chat-Historie (Gedächtnis)
 app.post('/generate', authenticateApp, async (req, res) => {
     try {
-        const { prompt } = req.body;
+        const { prompt, history } = req.body;
         if (!prompt) {
             return res.status(400).json({ error: 'Prompt fehlt im Request Body.' });
         }
 
+        // System-Prompt für Alexa-ähnlichen, freundlichen Sprachassistenten
+        const systemInstruction = "Du bist ein intelligenter, eleganter Tablet-Sprachassistent namens Intellegens. Antworte präzise, klar, natürlich und prägnant.";
+
+        let contents = [];
+        if (history && Array.isArray(history)) {
+            contents = history.map(item => ({
+                role: item.role,
+                parts: [{ text: item.text }]
+            }));
+        }
+        contents.push({ role: 'user', parts: [{ text: prompt }] });
+
         const response = await ai.models.generateContent({
             model: 'gemini-3.8-flash',
-            contents: prompt,
+            contents: contents,
+            config: {
+                systemInstruction: systemInstruction
+            }
         });
 
         res.json({ text: response.text });
