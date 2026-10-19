@@ -1,150 +1,86 @@
-package com.example.aiagent
+package com.example.aiintellegens
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
+
+    // DEINE DEPLOYED RENDER-URL UND SEKRÄTER APP-SCHLÜSSEL
+    private val SERVER_URL = "https://ai-intellegenss.onrender.com/generate"
+    private val APP_SECRET_TOKEN = "MeinSuperGeheimerSchluessel123!" // Muss exakt mit Render übereinstimmen!
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            AIAssistantApp()
+        setContentView(R.layout.activity_main)
+
+        val inputPrompt = findViewById<EditText>(R.id.inputPrompt)
+        val sendButton = findViewById<Button>(R.id.sendButton)
+        val responseText = findViewById<TextView>(R.id.responseText)
+
+        sendButton.setOnClickListener {
+            val prompt = inputPrompt.text.toString().trim()
+            if (prompt.isNotEmpty()) {
+                responseText.text = "Lade Antwort..."
+                sendPromptToServer(prompt) { result ->
+                    runOnUiThread {
+                        responseText.text = result
+                    }
+                }
+            } else {
+                inputPrompt.error = "Bitte erst einen Text eingeben"
+            }
         }
     }
-}
 
-@Composable
-fun AIAssistantApp() {
-    var isSpeaking by remember { mutableStateOf(true) }
-    var showMenu by remember { mutableStateOf(false) }
+    private fun sendPromptToServer(prompt: String, callback: (String) -> Unit) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = URL(SERVER_URL)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                
+                // Der geheime Schlüssel wird im Header mitgeschickt
+                conn.setRequestProperty("x-app-token", APP_SECRET_TOKEN)
+                conn.doOutput = true
+                conn.doInput = true
 
-    // Pulsierender Kreis für den Agenten
-    val infiniteTransition = rememberInfiniteTransition(label = "Pulse")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = if (isSpeaking) 1.35f else 1.02f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis: Int = 900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Scale"
-    )
+                val jsonParam = JSONObject()
+                jsonParam.put("prompt", prompt)
 
-    // Neutraler, eleganter Farbverlauf für den Hintergrund
-    val bgGradient = Brush.linearGradient(
-        colors = listOf(
-            Color(0xFF111827), // Sehr dunkles Grau/Blau
-            Color(0xFF1F2937), // Neutrales Slate
-            Color(0xFF2563EB).copy(alpha = 0.25f), // Dezent Blau
-            Color(0xFF7C3AED).copy(alpha = 0.15f)  // Dezent Violett
-        )
-    )
+                val os = OutputStreamWriter(conn.outputStream, "UTF-8")
+                os.write(jsonParam.toString())
+                os.flush()
+                os.close()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(bgGradient)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp)
-        ) {
-            // LINKER BEREICH: Der animierte KI-Agent
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center
-            ) {
-                // Äußerer Puls-Ring
-                Box(
-                    modifier = Modifier
-                        .size(170.dp)
-                        .scale(scale)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFF38BDF8),
-                                    Color(0xFF6366F1),
-                                    Color(0xFFA855F7)
-                                )
-                            )
-                        )
-                )
-                // Innerer Kern des Agenten
-                Box(
-                    modifier = Modifier
-                        .size(90.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.subduedAlpha())
-                ) {
-                    // Hier sitzt optisch der Agent
+                val responseCode = conn.responseCode
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    val responseString = conn.inputStream.bufferedReader().use { it.readText() }
+                    val jsonResponse = JSONObject(responseString)
+                    val textResult = jsonResponse.optString("text", "Keine Antwort erhalten")
+                    withContext(Dispatchers.Main) { callback(textResult) }
+                } else {
+                    val errorStream = conn.errorStream?.bufferedReader()?.use { it.readText() }
+                    withContext(Dispatchers.Main) { 
+                        callback("Fehler vom Server ($responseCode): ${errorStream ?: "Unbekannter Fehler"}") 
+                    }
                 }
-            }
-
-            // RECHTER BEREICH: Transkripte, Web-Medien (YouTube/Spotify Platzhalter)
-            Card(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(start = 16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.White.copy(alpha = 0.05f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "Live-Transkript & Medien",
-                        color = Color.White,
-                        fontSize = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Warte auf Eingabe...\n(Hier erscheinen später Bilder, Web-Inhalte oder Musik-Player)",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 14.sp
-                    )
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback("Verbindungsfehler: ${e.localizedMessage}")
                 }
             }
         }
-
-        // OBEN LINKS: Menü-Button für Einstellungen & Google-Login
-        IconButton(
-            onClick = { showMenu = true },
-            modifier = Modifier
-                .padding(16.dp)
-                .align(Alignment.TopStart)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Menu,
-                contentDescription = "Menü & Einstellungen",
-                tint = Color.White
-            )
-        }
     }
 }
-
-// Hilfsfunktion für dezente Farben
-fun Color.subduedAlpha(): Color = this.copy(alpha = 0.85f)
